@@ -1,5 +1,3 @@
-import numpy as np
-import matplotlib.pyplot as plt
 import pygame
 from scipy.constants import speed_of_light
 
@@ -12,6 +10,8 @@ LTYELLOW = (150, 150, 0)
 GREY = (100, 100, 100)
 BLUE = (0, 0, 255)
 LTBLUE = (0, 0, 150)
+GREEN = (0, 255, 0)
+LTGREEN = (0, 150, 0)
 
 class World:
     def __init__(self, scaling_factor, speedoflight=speed_of_light, screen_size=(800, 600)):
@@ -26,6 +26,7 @@ class World:
         self.particles = []
         self.photons = []
         self.photon_emiters = []
+        self.photon_sensors =[]
         self.time = 0
         self.reference_frame_velocity = 0.0
 
@@ -49,6 +50,8 @@ class World:
             photon.draw(self.screen)
         for photon_emiter in self.photon_emiters:
             photon_emiter.draw(self.screen)
+        for photon_sensor in self.photon_sensors:
+            photon_sensor.draw(self.screen, self.time)
         pygame.display.flip()
 
     def update(self, dt):
@@ -59,6 +62,8 @@ class World:
             photon.update(dt, self.meters_per_pixel, self.reference_frame_velocity)
         for photon_emiter in self.photon_emiters:
             photon_emiter.update(dt, self.meters_per_pixel, self.reference_frame_velocity, self.time)
+        for photon_sensor in self.photon_sensors:
+            photon_sensor.update(dt, self.meters_per_pixel, self.reference_frame_velocity, self.time)
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and self.slider_rect.collidepoint(event.pos):
@@ -157,12 +162,55 @@ class World:
             pygame.draw.line(screen, LTBLUE, (x1, 0), (x2, self.world.screen_HEIGHT), 2)
             pygame.draw.circle(screen, BLUE, (int(self.position), self.world.screen_HEIGHT // 2), 5)
 
+    class PhotonSensor:
+        def __init__(self, world, setup_position, velocity, detection_radius=10, activation_time=0.5):
+            self.position = setup_position
+            self.velocity = velocity
+            self.world = world
+            self.detection_radius = detection_radius
+            self.activated_until = 0
+            self.activation_time = activation_time
 
-world = World(scaling_factor=20)
+        def update(self, dt, meters_per_pixel, reference_frame_velocity, current_time):
+            adjusted_velocity = self.velocity - reference_frame_velocity
+            self.position = (self.position + (adjusted_velocity * dt) / meters_per_pixel) % self.world.screen_WIDTH
+
+            photons_to_remove = []  # List to store photons to be deleted
+
+            for photon in self.world.photons:
+                if abs(self.position - photon.position) < self.detection_radius:
+                    self.activated_until = current_time + self.activation_time
+                    photons_to_remove.append(photon)  # Mark photon for deletion
+
+            # Remove detected photons after looping
+            for photon in photons_to_remove:
+                self.world.photons.remove(photon)
+
+        def draw(self, screen, current_time):
+            adjusted_velocity = self.velocity - self.world.reference_frame_velocity
+            if abs(adjusted_velocity) < 1e-5:
+                x1 = x2 = self.position
+            else:
+                slope = -self.world.speedoflight / adjusted_velocity
+                delta_y = self.world.screen_HEIGHT
+                delta_x = delta_y / slope
+                x1 = self.position - delta_x / 2
+                x2 = self.position + delta_x / 2
+            pygame.draw.line(screen, LTGREEN, (x1, 0), (x2, self.world.screen_HEIGHT), 2)
+            color = GREEN if current_time < self.activated_until else WHITE
+            pygame.draw.circle(screen, color, (int(self.position), self.world.screen_HEIGHT // 2), 5)
+world = World(scaling_factor=40)
 # particle = world.Particle(world, setup_position=100, velocity=0.5*world.speedoflight)
 # photon = world.Photon(world, emission_position=200, direction_of_motion=1)
-emitter = world.Photon_emiter(world, setup_position=500, velocity=0.2*world.speedoflight, period=100)
+
+sensor_arrangement_speed = 0.*world.speedoflight
+sensor1 = world.PhotonSensor(world, setup_position=580, velocity=sensor_arrangement_speed)
+sensor2 = world.PhotonSensor(world, setup_position=420, velocity=sensor_arrangement_speed)
+emitter = world.Photon_emiter(world, setup_position=500, velocity=sensor_arrangement_speed, period=5)
 # world.particles.append(particle)
 # world.photons.append(photon)
 world.photon_emiters.append(emitter)
+world.photon_sensors.append(sensor1)
+world.photon_sensors.append(sensor2)
+world.reference_frame_velocity = 0.*world.speedoflight
 world.run()
