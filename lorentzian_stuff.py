@@ -124,22 +124,27 @@ class World:
             v = self.velocity
             self.gamma = 1.0 / np.sqrt(1 - (v / self.speedoflight) ** 2)
 
+
         def draw(self, screen):
             # compute screen x in the chosen reference frame
-            screen_x = int(self.world.to_screen_x(self.position, self.world.time))
-            # simple small 'line' to indicate direction using relativistic velocity addition:
+            screen_x = self.world.to_screen_x(self.position, self.world.time)
+            # relative velocity to the displayed frame
             V = self.world.reference_frame_velocity
             c = self.speedoflight
-            # velocity addition formula for u' (particle velocity seen in moving frame)
-            u = self.velocity
-            u_prime = (u - V) / (1 - (u * V) / (c ** 2))
-            # draw a short line segment proportional to u_prime (visual cue only)
-            length_px = max(2,
-                            min(self.world.screen_WIDTH // 4, int(abs(u_prime) * 1e-8)))  # scaling constant for visual
-            x1 = screen_x - length_px // 2
-            x2 = screen_x + length_px // 2
-            pygame.draw.line(screen, LTGREY, (x1, 0), (x2, self.world.screen_HEIGHT), 2)
-            pygame.draw.circle(screen, WHITE, (screen_x, self.world.screen_HEIGHT // 2), 5)
+            v_rel = self.velocity - V
+            # safety clamp (avoid division by zero / superluminal slope issues)
+            if abs(v_rel) < 1e-9:
+                x1 = x2 = screen_x
+            else:
+                if abs(v_rel) >= c:
+                    v_rel = np.sign(v_rel) * (c * 0.999999999)
+                slope = -c / v_rel
+                delta_y = self.world.screen_HEIGHT
+                delta_x = delta_y / slope
+                x1 = screen_x - delta_x / 2
+                x2 = screen_x + delta_x / 2
+            pygame.draw.line(screen, LTGREY, (int(x1), 0), (int(x2), self.world.screen_HEIGHT), 2)
+            pygame.draw.circle(screen, WHITE, (int(screen_x), self.world.screen_HEIGHT // 2), 5)
 
     # ---- Photon ----
     class Photon:
@@ -192,9 +197,24 @@ class World:
                 self.last_emission_time = current_time
 
         def draw(self, screen):
-            screen_x = int(self.world.to_screen_x(self.position, self.world.time))
-            pygame.draw.line(screen, LTBLUE, (screen_x, 0), (screen_x, self.world.screen_HEIGHT), 2)
-            pygame.draw.circle(screen, BLUE, (screen_x, self.world.screen_HEIGHT // 2), 5)
+            screen_x = self.world.to_screen_x(self.position, self.world.time)
+            V = self.world.reference_frame_velocity
+            c = self.speedoflight
+            v_rel = self.velocity - V
+
+            if abs(v_rel) < 1e-9:
+                x1 = x2 = screen_x
+            else:
+                if abs(v_rel) >= c:
+                    v_rel = np.sign(v_rel) * (c * 0.999999999)
+                slope = -c / v_rel
+                delta_y = self.world.screen_HEIGHT
+                delta_x = delta_y / slope
+                x1 = screen_x - delta_x / 2
+                x2 = screen_x + delta_x / 2
+
+            pygame.draw.line(screen, LTBLUE, (int(x1), 0), (int(x2), self.world.screen_HEIGHT), 2)
+            pygame.draw.circle(screen, BLUE, (int(screen_x), self.world.screen_HEIGHT // 2), 5)
 
     # ---- PhotonSensor ----
     class PhotonSensor:
@@ -215,7 +235,7 @@ class World:
             photons_to_remove = []
             for photon in self.world.photons:
                 # use lab-frame positions for detection radius (consistent)
-                if abs(self.position - photon.position) < self.detection_radius:
+                if abs(self.world.to_screen_x(self.position, self.world.time) - photon.position) < self.detection_radius:
                     self.activated_until = current_time + self.activation_time
                     photons_to_remove.append(photon)
             for p in photons_to_remove:
@@ -225,10 +245,25 @@ class World:
                     pass
 
         def draw(self, screen, current_time):
-            screen_x = int(self.world.to_screen_x(self.position, self.world.time))
+            screen_x = self.world.to_screen_x(self.position, self.world.time)
+            V = self.world.reference_frame_velocity
+            c = self.speedoflight
+            v_rel = self.velocity - V
+
+            if abs(v_rel) < 1e-9:
+                x1 = x2 = screen_x
+            else:
+                if abs(v_rel) >= c:
+                    v_rel = np.sign(v_rel) * (c * 0.999999999)
+                slope = -c / v_rel
+                delta_y = self.world.screen_HEIGHT
+                delta_x = delta_y / slope
+                x1 = screen_x - delta_x / 2
+                x2 = screen_x + delta_x / 2
+
+            pygame.draw.line(screen, LTGREEN, (int(x1), 0), (int(x2), self.world.screen_HEIGHT), 2)
             color = GREEN if current_time < self.activated_until else WHITE
-            pygame.draw.line(screen, LTGREEN, (screen_x, 0), (screen_x, self.world.screen_HEIGHT), 2)
-            pygame.draw.circle(screen, color, (screen_x, self.world.screen_HEIGHT // 2), 5)
+            pygame.draw.circle(screen, color, (int(screen_x), self.world.screen_HEIGHT // 2), 5)
 world = World(scaling_factor=40)
 # particle = world.Particle(world, setup_position=100, velocity=0.5*world.speedoflight)
 # photon = world.Photon(world, emission_position=200, direction_of_motion=1)
