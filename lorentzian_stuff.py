@@ -143,52 +143,27 @@ class World:
 
     # ---- Photon ----
     class Photon:
-        def __init__(self, world, emission_position_in_current_frame, direction_of_motion):
+        def __init__(self, world, emission_position, direction_of_motion):
+            self.position = emission_position
             self.world = world
-            self.velocity = direction_of_motion * world.speedoflight  # ±c
-
-            # Get current reference frame velocity
-            V = world.reference_frame_velocity
-            c = world.speedoflight
-            gamma = 1.0 / np.sqrt(1 - (V / c) ** 2)
-
-            # Convert from pixels (current frame) → meters
-            x_prime_m = emission_position_in_current_frame * world.meters_per_pixel
-            t = world.time
-
-            # Inverse Lorentz transform: current frame → lab frame
-            x_lab_m = gamma * (x_prime_m + V * t)
-
-            # Store lab-frame position in pixels (for updates and collisions)
-            self.position = (x_lab_m / world.meters_per_pixel) % world.screen_WIDTH
+            self.velocity = direction_of_motion * world.speedoflight
 
         def update(self, dt, meters_per_pixel, reference_frame_velocity):
-            # Photon motion in the LAB frame — never affected by reference frame velocity.
-            # Always moves at ±c in lab coordinates.
-            delta_px = (self.velocity * dt) / meters_per_pixel
-            self.position = (self.position + delta_px) % self.world.screen_WIDTH
+            adjusted_velocity = self.velocity
+            self.position = (self.position + (adjusted_velocity * dt) / meters_per_pixel) % self.world.screen_WIDTH
 
         def draw(self, screen):
-            # Apply Lorentz transformation to draw photon position in current reference frame.
-            V = self.world.reference_frame_velocity
-            c = self.world.speedoflight
-            if abs(V) >= c:
-                V = np.sign(V) * (c * 0.999999999)  # avoid singularities
-
-
-            # Convert lab position (pixels → meters)
-            x_lab = self.position * self.world.meters_per_pixel
-            t = self.world.time
-
-            # Lorentz transform (x', t') for current frame
-            x_prime_m = x_lab
-
-            # Convert back to pixels for rendering
-            x_prime_px = (x_prime_m / self.world.meters_per_pixel) % self.world.screen_WIDTH
-
-            # Draw photon in the transformed frame
-            pygame.draw.line(screen, LTYELLOW, (x_prime_px, 0), (x_prime_px, self.world.screen_HEIGHT), 2)
-            pygame.draw.circle(screen, YELLOW, (int(x_prime_px), self.world.screen_HEIGHT // 2), 5)
+            adjusted_velocity = self.velocity
+            if abs(adjusted_velocity) < 1e-5:
+                x1 = x2 = self.position
+            else:
+                slope = -self.world.speedoflight / adjusted_velocity
+                delta_y = self.world.screen_HEIGHT
+                delta_x = delta_y / slope
+                x1 = self.position - delta_x / 2
+                x2 = self.position + delta_x / 2
+            pygame.draw.line(screen, LTYELLOW, (x1, 0), (x2, self.world.screen_HEIGHT), 2)
+            pygame.draw.circle(screen, YELLOW, (int(self.position), self.world.screen_HEIGHT // 2), 5)
 
     # ---- Photon_emiter ----
     class Photon_emiter:
@@ -211,8 +186,9 @@ class World:
             lab_interval = self.gamma * self.emission_interval
             if current_time - self.last_emission_time >= lab_interval:
                 # emit photons at emitter's current lab-frame position
-                self.world.photons.append(World.Photon(self.world, self.position, 1))
-                self.world.photons.append(World.Photon(self.world, self.position, -1))
+                screen_x = int(self.world.to_screen_x(self.position, self.world.time))
+                self.world.photons.append(World.Photon(self.world, screen_x, 1))
+                self.world.photons.append(World.Photon(self.world, screen_x, -1))
                 self.last_emission_time = current_time
 
         def draw(self, screen):
