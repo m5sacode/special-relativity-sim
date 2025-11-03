@@ -56,7 +56,10 @@ class World:
         pygame.display.flip()
 
     def update(self, dt):
-        self.time += dt
+        V = self.reference_frame_velocity
+        c = self.speedoflight
+        self.gamma = 1.0 / np.sqrt(1 - (V / c) ** 2)
+        self.time += (dt / self.gamma)
         for particle in self.particles:
             particle.update(dt, self.meters_per_pixel, self.reference_frame_velocity)
         for photon in self.photons:
@@ -89,7 +92,6 @@ class World:
             self.draw()
         pygame.quit()
 
-    # Add this helper to World (as a method)
     def to_screen_x(self, position_pixels, t_world):
         """
         Convert stored position in pixels (lab frame) at lab time t_world (s)
@@ -106,6 +108,35 @@ class World:
         xprime_pixels = xprime_m / self.meters_per_pixel
         # wrap to screen width in pixels
         return xprime_pixels % self.screen_WIDTH
+
+    def _display_x_to_lab_px(self, x_display_px, t_world):
+        """
+        Convert x' (display/current-frame pixels) at lab time t_world -> lab-frame pixels.
+        Inverse Lorentz: x = gamma * (x' + V t)
+        """
+        V = self.reference_frame_velocity
+        c = self.speedoflight
+        if abs(V) >= c:
+            V = np.sign(V) * (c * 0.999999999)
+        gamma = 1.0 / np.sqrt(1 - (V / c) ** 2)
+
+        xprime_m = x_display_px * self.meters_per_pixel
+        x_lab_m = gamma * (xprime_m + V * t_world)
+        return (x_lab_m / self.meters_per_pixel) % self.screen_WIDTH
+
+    def _vel_display_to_lab(self, u_display):
+        """
+        Convert a velocity u' given in the current/display frame -> lab-frame velocity u.
+        Formula: u = (u' + V) / (1 + u' V / c^2)
+        All inputs/outputs in m/s.
+        """
+        V = self.reference_frame_velocity
+        c = self.speedoflight
+        denom = 1.0 + (u_display * V) / (c ** 2)
+        if abs(denom) < 1e-15:
+            # pathological near-light denominator: clamp to keep things safe
+            return np.sign(u_display + V) * (c * 0.999999999)
+        return (u_display + V) / denom
 
     # ---- Particle ----
     class Particle:
@@ -124,25 +155,29 @@ class World:
             v = self.velocity
             self.gamma = 1.0 / np.sqrt(1 - (v / self.speedoflight) ** 2)
 
-
         def draw(self, screen):
-            # compute screen x in the chosen reference frame
             screen_x = self.world.to_screen_x(self.position, self.world.time)
-            # relative velocity to the displayed frame
             V = self.world.reference_frame_velocity
             c = self.speedoflight
-            v_rel = self.velocity - V
-            # safety clamp (avoid division by zero / superluminal slope issues)
-            if abs(v_rel) < 1e-9:
+            # relativistic velocity addition: u' = (u - V) / (1 - u V / c^2)
+            u = self.velocity
+            denom = 1.0 - (u * V) / (c ** 2)
+            if abs(denom) < 1e-12:
+                u_prime = np.sign(u - V) * (c * 0.999999999)
+            else:
+                u_prime = (u - V) / denom
+
+            if abs(u_prime) < 1e-9:
                 x1 = x2 = screen_x
             else:
-                if abs(v_rel) >= c:
-                    v_rel = np.sign(v_rel) * (c * 0.999999999)
-                slope = -c / v_rel
+                if abs(u_prime) >= c:
+                    u_prime = np.sign(u_prime) * (c * 0.999999999)
+                slope = -c / u_prime
                 delta_y = self.world.screen_HEIGHT
                 delta_x = delta_y / slope
                 x1 = screen_x - delta_x / 2
                 x2 = screen_x + delta_x / 2
+
             pygame.draw.line(screen, LTGREY, (int(x1), 0), (int(x2), self.world.screen_HEIGHT), 2)
             pygame.draw.circle(screen, WHITE, (int(screen_x), self.world.screen_HEIGHT // 2), 5)
 
@@ -181,12 +216,12 @@ class World:
             self.last_emission_time = -period
 
         def update(self, dt, meters_per_pixel, reference_frame_velocity, current_time):
-            # Update emitter position in lab frame
-            delta_px = (self.velocity * dt) / meters_per_pixel
-            self.position = (self.position + delta_px) % self.world.screen_WIDTH
             # compute gamma for emitter relative to lab
             v = self.velocity
             self.gamma = 1.0 / np.sqrt(1 - (v / self.speedoflight) ** 2)
+            # Update emitter position in lab frame
+            delta_px = (self.velocity * dt) /(meters_per_pixel)
+            self.position = (self.position + delta_px) % self.world.screen_WIDTH
             # If period is proper period (in emitter rest frame) then lab interval is gamma * period
             lab_interval = self.gamma * self.emission_interval
             if current_time - self.last_emission_time >= lab_interval:
@@ -200,14 +235,19 @@ class World:
             screen_x = self.world.to_screen_x(self.position, self.world.time)
             V = self.world.reference_frame_velocity
             c = self.speedoflight
-            v_rel = self.velocity - V
+            u = self.velocity
+            denom = 1.0 - (u * V) / (c ** 2)
+            if abs(denom) < 1e-12:
+                u_prime = np.sign(u - V) * (c * 0.999999999)
+            else:
+                u_prime = (u - V) / denom
 
-            if abs(v_rel) < 1e-9:
+            if abs(u_prime) < 1e-9:
                 x1 = x2 = screen_x
             else:
-                if abs(v_rel) >= c:
-                    v_rel = np.sign(v_rel) * (c * 0.999999999)
-                slope = -c / v_rel
+                if abs(u_prime) >= c:
+                    u_prime = np.sign(u_prime) * (c * 0.999999999)
+                slope = -c / u_prime
                 delta_y = self.world.screen_HEIGHT
                 delta_x = delta_y / slope
                 x1 = screen_x - delta_x / 2
@@ -248,14 +288,19 @@ class World:
             screen_x = self.world.to_screen_x(self.position, self.world.time)
             V = self.world.reference_frame_velocity
             c = self.speedoflight
-            v_rel = self.velocity - V
+            u = self.velocity
+            denom = 1.0 - (u * V) / (c ** 2)
+            if abs(denom) < 1e-12:
+                u_prime = np.sign(u - V) * (c * 0.999999999)
+            else:
+                u_prime = (u - V) / denom
 
-            if abs(v_rel) < 1e-9:
+            if abs(u_prime) < 1e-9:
                 x1 = x2 = screen_x
             else:
-                if abs(v_rel) >= c:
-                    v_rel = np.sign(v_rel) * (c * 0.999999999)
-                slope = -c / v_rel
+                if abs(u_prime) >= c:
+                    u_prime = np.sign(u_prime) * (c * 0.999999999)
+                slope = -c / u_prime
                 delta_y = self.world.screen_HEIGHT
                 delta_x = delta_y / slope
                 x1 = screen_x - delta_x / 2
