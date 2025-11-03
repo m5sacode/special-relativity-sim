@@ -15,7 +15,7 @@ GREEN = (0, 255, 0)
 LTGREEN = (0, 150, 0)
 
 class World:
-    def __init__(self, scaling_factor, speedoflight=speed_of_light, screen_size=(800, 600)):
+    def __init__(self, scaling_factor, speedoflight=speed_of_light, screen_size=(1000, 600)):
         self.scaling_factor = scaling_factor
         self.speedoflight = speedoflight
         pygame.init()
@@ -60,6 +60,7 @@ class World:
         c = self.speedoflight
         self.gamma = 1.0 / np.sqrt(1 - (V / c) ** 2)
         self.time += (dt / self.gamma)
+        self.time += (dt)
         for particle in self.particles:
             particle.update(dt, self.meters_per_pixel, self.reference_frame_velocity)
         for photon in self.photons:
@@ -148,12 +149,14 @@ class World:
             self.speedoflight = world.speedoflight
 
         def update(self, dt, meters_per_pixel, reference_frame_velocity):
-            # Update in lab frame (no Lorentz mixing here)
-            delta_px = (self.velocity * dt) / meters_per_pixel
-            self.position = (self.position + delta_px) % self.world.screen_WIDTH
             # gamma of particle's own rest (if needed later)
             v = self.velocity
             self.gamma = 1.0 / np.sqrt(1 - (v / self.speedoflight) ** 2)
+            # Update in lab frame (no Lorentz mixing here)
+            dt = (dt/self.gamma)
+
+            delta_px = (self.velocity * dt) / meters_per_pixel
+            self.position = (self.position + delta_px) % self.world.screen_WIDTH
 
         def draw(self, screen):
             screen_x = self.world.to_screen_x(self.position, self.world.time)
@@ -216,11 +219,13 @@ class World:
             self.last_emission_time = -period
 
         def update(self, dt, meters_per_pixel, reference_frame_velocity, current_time):
-            # compute gamma for emitter relative to lab
+            # gamma of particle's own rest (if needed later)
             v = self.velocity
             self.gamma = 1.0 / np.sqrt(1 - (v / self.speedoflight) ** 2)
-            # Update emitter position in lab frame
-            delta_px = (self.velocity * dt) /(meters_per_pixel)
+            # Update in lab frame (no Lorentz mixing here)
+            dt = (dt / self.gamma)
+
+            delta_px = (self.velocity * dt) / meters_per_pixel
             self.position = (self.position + delta_px) % self.world.screen_WIDTH
             # If period is proper period (in emitter rest frame) then lab interval is gamma * period
             lab_interval = self.gamma * self.emission_interval
@@ -269,7 +274,10 @@ class World:
 
         def update(self, dt, meters_per_pixel, reference_frame_velocity, current_time):
             # update sensor position in lab frame
-            delta_px = (self.velocity * dt) / meters_per_pixel
+            # compute gamma for emitter relative to lab
+            v = self.velocity
+            self.gamma = 1.0 / np.sqrt(1 - (v / self.speedoflight) ** 2)
+            delta_px = (self.velocity * dt/self.gamma) / meters_per_pixel
             self.position = (self.position + delta_px) % self.world.screen_WIDTH
             # detection: compare pixel distance in lab frame (or use transformed positions; here we keep it simple)
             photons_to_remove = []
@@ -309,7 +317,9 @@ class World:
             pygame.draw.line(screen, LTGREEN, (int(x1), 0), (int(x2), self.world.screen_HEIGHT), 2)
             color = GREEN if current_time < self.activated_until else WHITE
             pygame.draw.circle(screen, color, (int(screen_x), self.world.screen_HEIGHT // 2), 5)
-world = World(scaling_factor=40)
+
+
+world = World(scaling_factor=10)
 # particle = world.Particle(world, setup_position=100, velocity=0.5*world.speedoflight)
 # photon = world.Photon(world, emission_position=200, direction_of_motion=1)
 
@@ -317,8 +327,14 @@ sensor_arrangement_speed = 0.*world.speedoflight
 sensor1 = world.PhotonSensor(world, setup_position=580, velocity=sensor_arrangement_speed)
 sensor2 = world.PhotonSensor(world, setup_position=420, velocity=sensor_arrangement_speed)
 emitter = world.Photon_emiter(world, setup_position=500, velocity=sensor_arrangement_speed, period=5)
+
+gate_right = world.Particle(world, setup_position=580, velocity=0)
+gate_left = world.Particle(world, setup_position=420, velocity=0)
+
 # world.particles.append(particle)
 # world.photons.append(photon)
+world.particles.append(gate_right)
+world.particles.append(gate_left)
 world.photon_emiters.append(emitter)
 world.photon_sensors.append(sensor1)
 world.photon_sensors.append(sensor2)
